@@ -46,12 +46,10 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=30
 )
 
-# 🛠️ [핵심 수정]: 최신 스트림릿 인증 라이브러리 공식 문법 가이드를 완벽 반영했습니다.
-# 위치(location) 인자를 키워드 형태로 정확하게 명시합니다.
+# 로그인 화면 출력
 try:
     authenticator.login(form_name="로그인", location="main")
 except TypeError:
-    # 하위 버전 및 구형 문법 백업 예외 처리
     authenticator.login("main", "fields")
 
 # 세션 상태에서 안전하게 결과값 추출
@@ -71,49 +69,80 @@ elif authentication_status is None:
 # [케이스 C] 로그인이 성공했을 때 (이 아래로 메인 프로그램 작동)
 elif authentication_status:
     
-    # ⚙️ 스트림릿 기본 페이지 설정 (에러 방지를 위해 로그인 직후에 배치)
+    # ⚙️ 스트림릿 기본 페이지 설정
     st.set_page_config(page_title="kangmini - AI 어시스턴트", page_icon="✨", layout="wide")
 
-    # 4. 👑 관리자 전용 회원 생성 대시보드 (오직 'admin' 계정에게만 표시됨)
+    # 4. 👑 관리자 전용 대시보드 (오직 'admin' 계정에게만 표시됨)
     if username == "admin":
         with st.sidebar:
-            st.subheader("👑 관리자 메뉴 (계정 생성)")
+            st.subheader("👑 관리자 메뉴")
             
-            with st.form("new_user_form", clear_on_submit=True):
-                new_id = st.text_input("새 사용자 ID (영문/숫자)").strip()
-                new_name = st.text_input("새 사용자 이름(닉네임)").strip()
-                new_pw = st.text_input("새 사용자 비밀번호", type="password").strip()
-                submit_btn = st.form_submit_button("🚀 신규 계정 승인 및 저장")
+            # --- 탭을 나누어 계정 생성과 관리를 분리 ---
+            tab_create, tab_manage = st.tabs(["➕ 계정 생성", "⚙️ 계정 관리"])
+            
+            # [탭 1: 계정 생성]
+            with tab_create:
+                with st.form("new_user_form", clear_on_submit=True):
+                    new_id = st.text_input("새 사용자 ID (영문/숫자)").strip()
+                    new_name = st.text_input("새 사용자 이름(닉네임)").strip()
+                    new_pw = st.text_input("새 사용자 비밀번호", type="password").strip()
+                    submit_btn = st.form_submit_button("🚀 신규 계정 승인 및 저장")
+                    
+                    if submit_btn:
+                        if not new_id or not new_name or not new_pw:
+                            st.error("모든 칸을 입력해 주세요.")
+                        elif new_id in credentials["usernames"]:
+                            st.error("이미 존재하는 아이디입니다.")
+                        else:
+                            credentials["usernames"][new_id] = {
+                                "name": new_name,
+                                "password": stauth.Hasher.hash(new_pw)
+                            }
+                            save_users(credentials)
+                            st.success(f"🎉 '{new_name}'님의 계정이 승인되었습니다!")
+                            st.rerun()
+
+            # 🛠️ [탭 2: 계정 관리 - 삭제 기능 핵심 추가]
+            with tab_manage:
+                st.markdown("**현재 등록된 사용자 목록**")
                 
-                if submit_btn:
-                    if not new_id or not new_name or not new_pw:
-                        st.error("모든 칸을 입력해 주세요.")
-                    elif new_id in credentials["usernames"]:
-                        st.error("이미 존재하는 아이디입니다.")
-                    else:
-                        # 비밀번호 암호화 후 데이터베이스에 추가
-                        credentials["usernames"][new_id] = {
-                            "name": new_name,
-                            "password": stauth.Hasher.hash(new_pw)
-                        }
-                        save_users(credentials) # 파일에 즉시 저장
-                        st.success(f"🎉 '{new_name}'님의 계정이 승인되어 보관되었습니다!")
-                        st.rerun() # 새로고침하여 인증 모듈에 즉시 반영
+                # 마스터 관리자(admin)를 제외한 일반 사용자들만 필터링
+                user_list = [uid for uid in credentials["usernames"].keys() if uid != "admin"]
+                
+                if not user_list:
+                    st.caption("등록된 일반 사용자가 없습니다.")
+                else:
+                    for uid in user_list:
+                        u_name = credentials["usernames"][uid]["name"]
+                        
+                        # 가로 레이아웃으로 이름 표시와 삭제 버튼 배치
+                        col_u, col_b = st.columns([3, 2])
+                        with col_u:
+                            st.markdown(f"👤 **{u_name}** (`{uid}`)")
+                        with col_b:
+                            # 각 유저마다 고유한 고유 키를 지정하여 버튼 생성
+                            if st.button("🗑️ 삭제", key=f"del_{uid}", use_container_width=True):
+                                # 데이터베이스에서 유저 삭제
+                                del credentials["usernames"][uid]
+                                save_users(credentials)
+                                
+                                # 해당 유저의 과거 대화 내역 파일도 함께 깔끔하게 삭제 (선택 사항)
+                                target_history = f"chat_history_{uid}.json"
+                                if os.path.exists(target_history):
+                                    os.remove(target_history)
+                                    
+                                st.success(f"❌ {u_name} 계정이 삭제되었습니다.")
+                                st.rerun()
 
     # --- 메인 AI 대화 공간 ---
-    # 사용자별 독립된 대화 내역 파일명 지정
     HISTORY_FILE = f"chat_history_{username}.json"
 
-    # 메인 화면 상단 레이아웃을 2개의 칸(제목 칸, 로그아웃 버튼 칸)으로 분할
-    col1, col2 = st.columns([4, 1]) # 가로 비율 설정 (제목 넓게, 버튼 좁게)
-    
+    col1, col2 = st.columns()
     with col1:
         st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
         st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
-        
     with col2:
-        st.write("") # 간격 조절용
-        # 최신 버전에 호환되는 메인 화면 로그아웃 버튼 배치
+        st.write("") 
         authenticator.logout(button_name="로그아웃", location="main")
 
     def load_history():
@@ -129,7 +158,6 @@ elif authentication_status:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(messages, f, ensure_ascii=False, indent=4)
 
-    # 제미나이 API 환경 변수 설정
     if "GEMINI_API_KEY" in st.secrets:
         os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
     else:
@@ -148,7 +176,7 @@ elif authentication_status:
         st.markdown("**기반 기술:** Gemini 3.5 Flash")
         st.markdown("---")
         
-        if st.button("🗑️ 내 대화 내역만 삭제"):
+        if st.button("🗑️ 내 대화 내역만 삭제", key="clear_my_chat"):
             st.session_state.messages = []
             if os.path.exists(HISTORY_FILE):
                 os.remove(HISTORY_FILE)
