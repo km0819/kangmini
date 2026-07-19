@@ -46,20 +46,34 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=30
 )
 
-# 로그인 화면 출력
-name, authentication_status, username = authenticator.login(location="main")
+# 🛠️ [핵심 수정]: 최신 라이브러리 문법 규격에 맞게 인자 구조를 변경했습니다.
+try:
+    result = authenticator.login(form_name='로그인', location='main')
+    
+    # 최근 버전 대응을 위한 세션 상태 매핑
+    if 'authentication_status' in st.session_state:
+        authentication_status = st.session_state['authentication_status']
+        name = st.session_state.get('name', '')
+        username = st.session_state.get('username', '')
+    else:
+        authentication_status = None
+except TypeError:
+    # 혹시 모를 버전을 대비한 예외 처리용 백업 문법
+    name, authentication_status, username = authenticator.login('로그인', 'main')
 
+# [케이스 A] 로그인이 실패했을 때
 if authentication_status is False:
     st.error("❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
     st.stop()
+# [케이스 B] 아직 로그인을 하지 않은 기본 상태일 때
 elif authentication_status is None:
     st.warning("🔒 승인된 계정으로 로그인 후 이용해 주세요.")
     st.stop()
 
-# 3. 🎉 로그인 성공 시 메인 프로그램 작동
+# [케이스 C] 로그인이 성공했을 때 (이 아래로 메인 프로그램 작동)
 elif authentication_status:
     
-    # ⚙️ 스트림릿 기본 페이지 설정
+    # ⚙️ 스트림릿 기본 페이지 설정 (에러 방지를 위해 메인 실행 직후 호출)
     st.set_page_config(page_title="kangmini - AI 어시스턴트", page_icon="✨", layout="wide")
 
     # 4. 👑 관리자 전용 회원 생성 대시보드 (오직 'admin' 계정에게만 표시됨)
@@ -100,8 +114,8 @@ elif authentication_status:
         st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
         
     with col2:
-        # 우측 상단에 로그아웃 버튼 배치
         st.write("") 
+        # 최신 버전에 호환되는 메인 화면 로그아웃 렌더링
         authenticator.logout("로그아웃", "main")
 
     def load_history():
