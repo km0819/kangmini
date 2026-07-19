@@ -59,13 +59,12 @@ elif authentication_status is None:
 # 3. 🎉 로그인 성공 시 메인 프로그램 작동
 elif authentication_status:
     
-    # ⚙️ 스트림릿 기본 페이지 설정 (로그인 성공 후 한 번만 호출되도록 변경)
+    # ⚙️ 스트림릿 기본 페이지 설정
     st.set_page_config(page_title="kangmini - AI 어시스턴트", page_icon="✨", layout="wide")
 
     # 4. 👑 관리자 전용 회원 생성 대시보드 (오직 'admin' 계정에게만 표시됨)
     if username == "admin":
         with st.sidebar:
-            st.markdown("---")
             st.subheader("👑 관리자 메뉴 (계정 생성)")
             
             with st.form("new_user_form", clear_on_submit=True):
@@ -93,8 +92,17 @@ elif authentication_status:
     # 사용자별 독립된 대화 내역 파일명 지정
     HISTORY_FILE = f"chat_history_{username}.json"
 
-    st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
-    st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
+    # 메인 화면 상단 레이아웃을 2개의 칸(제목 칸, 로그아웃 버튼 칸)으로 분할
+    col1, col2 = st.columns([4, 1])
+    
+    with col1:
+        st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
+        st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
+        
+    with col2:
+        # 우측 상단에 로그아웃 버튼 배치
+        st.write("") 
+        authenticator.logout("로그아웃", "main")
 
     def load_history():
         if os.path.exists(HISTORY_FILE):
@@ -133,9 +141,6 @@ elif authentication_status:
             if os.path.exists(HISTORY_FILE):
                 os.remove(HISTORY_FILE)
             st.rerun()
-            
-        st.markdown("---")
-        authenticator.logout("로그아웃", "sidebar")
 
     # 이전 기록 출력
     for message in st.session_state.messages:
