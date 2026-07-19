@@ -46,20 +46,18 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=30
 )
 
-# 🛠️ [핵심 수정]: 최신 라이브러리 문법 규격에 맞게 인자 구조를 변경했습니다.
+# 🛠️ [핵심 수정]: 최신 스트림릿 인증 라이브러리 공식 문법 가이드를 완벽 반영했습니다.
+# 위치(location) 인자를 키워드 형태로 정확하게 명시합니다.
 try:
-    result = authenticator.login(form_name='로그인', location='main')
-    
-    # 최근 버전 대응을 위한 세션 상태 매핑
-    if 'authentication_status' in st.session_state:
-        authentication_status = st.session_state['authentication_status']
-        name = st.session_state.get('name', '')
-        username = st.session_state.get('username', '')
-    else:
-        authentication_status = None
+    authenticator.login(form_name="로그인", location="main")
 except TypeError:
-    # 혹시 모를 버전을 대비한 예외 처리용 백업 문법
-    name, authentication_status, username = authenticator.login('로그인', 'main')
+    # 하위 버전 및 구형 문법 백업 예외 처리
+    authenticator.login("main", "fields")
+
+# 세션 상태에서 안전하게 결과값 추출
+authentication_status = st.session_state.get('authentication_status', None)
+name = st.session_state.get('name', '')
+username = st.session_state.get('username', '')
 
 # [케이스 A] 로그인이 실패했을 때
 if authentication_status is False:
@@ -73,7 +71,7 @@ elif authentication_status is None:
 # [케이스 C] 로그인이 성공했을 때 (이 아래로 메인 프로그램 작동)
 elif authentication_status:
     
-    # ⚙️ 스트림릿 기본 페이지 설정 (에러 방지를 위해 메인 실행 직후 호출)
+    # ⚙️ 스트림릿 기본 페이지 설정 (에러 방지를 위해 로그인 직후에 배치)
     st.set_page_config(page_title="kangmini - AI 어시스턴트", page_icon="✨", layout="wide")
 
     # 4. 👑 관리자 전용 회원 생성 대시보드 (오직 'admin' 계정에게만 표시됨)
@@ -107,16 +105,16 @@ elif authentication_status:
     HISTORY_FILE = f"chat_history_{username}.json"
 
     # 메인 화면 상단 레이아웃을 2개의 칸(제목 칸, 로그아웃 버튼 칸)으로 분할
-    col1, col2 = st.columns([4, 1])
+    col1, col2 = st.columns([4, 1]) # 가로 비율 설정 (제목 넓게, 버튼 좁게)
     
     with col1:
         st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
         st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
         
     with col2:
-        st.write("") 
-        # 최신 버전에 호환되는 메인 화면 로그아웃 렌더링
-        authenticator.logout("로그아웃", "main")
+        st.write("") # 간격 조절용
+        # 최신 버전에 호환되는 메인 화면 로그아웃 버튼 배치
+        authenticator.logout(button_name="로그아웃", location="main")
 
     def load_history():
         if os.path.exists(HISTORY_FILE):
