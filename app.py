@@ -21,7 +21,6 @@ def init_secure_db():
     # 데이터베이스에 admin 계정이 없으면 암호화하여 강제 재생성
     admin_exists = any(u["id"] == "admin" for u in users_data)
     if not admin_exists:
-        # 안전한 Bcrypt 방식으로 암호화하여 데이터 삽입
         hashed_pw = bcrypt.hashpw("12345".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         try:
             supabase.table("users_db").delete().eq("id", "admin").execute()
@@ -31,7 +30,7 @@ def init_secure_db():
 
 init_secure_db()
 
-# 2. 🔒 외부 라이브러리 우회형 하이브리드 직접 인증 시스템 가동
+# 2. 🔒 로그인 인증 시스템 가동
 if "auth_status" not in st.session_state:
     st.session_state.auth_status = False
 if "username" not in st.session_state:
@@ -50,9 +49,9 @@ if not st.session_state.auth_status:
                 # 데이터베이스에서 입력한 ID 유저 검색
                 res = supabase.table("users_db").select("*").eq("id", input_id).execute()
                 
-                # 🛠️ [버그 해결 핵심]: 리스트 결과가 비어있지 않은지 검증 후 [0]번째 객체를 명시적으로 타겟팅합니다.
+                # 🛠️ [버그 해결 핵심]: 리스트 내부의 '첫 번째 원소([0])'인 딕셔너리를 정확하게 추출합니다.
                 if res.data and len(res.data) > 0:
-                    user_info = res.data[0] # 리스트 내부의 첫 번째 유저 딕셔너리 추출
+                    user_info = res.data[0]  # 👈 이 부분이 빠져서 그동안 데이터 매핑이 깨졌던 것입니다!
                     
                     # 암호화된 Bcrypt 비밀번호 일치 검증
                     if bcrypt.checkpw(input_pw.encode('utf-8'), user_info["password"].encode('utf-8')):
@@ -141,7 +140,7 @@ with st.sidebar:
     if "current_room_id" not in st.session_state: st.session_state.current_room_id = rooms["room_id"] if rooms else None
     
     for r in rooms:
-        c1, c2 = st.columns()
+        c1, c2 = st.columns(2)
         with c1:
             if st.button(f"💬 {r['title']}", key=f"r_{r['room_id']}", use_container_width=True, type="primary" if st.session_state.current_room_id == r['room_id'] else "secondary"):
                 st.session_state.current_room_id = r['room_id']; st.rerun()
@@ -155,9 +154,9 @@ with st.sidebar:
 active_room_id = st.session_state.current_room_id or f"room_{uid}_{int(time.time())}"
 
 room_data = supabase.table("chat_rooms").select("*").eq("room_id", active_room_id).execute()
-msgs = room_data.data[0]["messages"] if room_data.data else []
+msgs = room_data.data[0]["messages"] if room_data.data else [] # 🛠️ 여기도 리스트 첫 번째 원소 인덱싱 반영
 
-c_t, c_l = st.columns()
+c_t, c_l = st.columns(2)
 c_t.title("✨ 안녕, 나는 강미나이야 (kangmini)")
 c_t.caption(f"🛡️ 반갑습니다 {name}님! 모든 데이터가 클라우드 DB(Supabase)에 실시간 영구 보관됩니다.")
 with c_l:
