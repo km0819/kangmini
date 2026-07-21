@@ -1,228 +1,102 @@
-import streamlit as st
+import streamlit as st, os, json, time, bcrypt, streamlit_authenticator as stauth
 from google import genai
 from google.genai import types
-import streamlit_authenticator as stauth
-import json
-import os
 
-# 파일 경로 정의
-USER_DB_FILE = "users_db.json"
+DB, INDEX = "users_db.json", "chat_rooms_index.json"
 
-# 1. 📂 회원 정보 불러오기 및 저장 함수
-def load_users():
-    """저장된 회원 목록을 불러옵니다. 파일이 없으면 기본 마스터 관리자(admin)를 생성합니다."""
-    if os.path.exists(USER_DB_FILE):
-        try:
-            with open(USER_DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-            
-    # 초기 실행 시 마스터 관리자 계정 생성 (아이디: admin / 비밀번호: 12345)
-    default_db = {
-        "usernames": {
-            "admin": {
-                "name": "마스터 관리자",
-                "password": stauth.Hasher.hash("12345")
-            }
-        }
-    }
-    save_users(default_db)
-    return default_db
+def load_j(f, d):
+    try: return json.load(open(f, "r", encoding="utf-8")) if os.path.exists(f) else d
+    except: return d
+def save_j(f, d): json.dump(d, open(f, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
 
-def save_users(user_data):
-    """회원 목록을 JSON 파일로 저장합니다."""
-    with open(USER_DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(user_data, f, ensure_ascii=False, indent=4)
+# 1. 유저 DB 로드 및 인증 초기화
+db = load_j(DB, {"usernames": {"admin": {"name": "관리자", "password": stauth.Hasher.hash("12345")}}})
+save_j(DB, db)
+auth = stauth.Authenticate(db, "k_cookie", "k_key", 30)
 
-# 회원 데이터베이스 로드
-credentials = load_users()
+try: auth.login("로그인", "main")
+except: auth.login("main", "fields")
 
-# 2. 🔒 로그인 인증 객체 생성 (30일 로그인 유지)
-authenticator = stauth.Authenticate(
-    credentials,
-    cookie_name="kangmini_login_cookie",
-    cookie_key="kangmini_secret_signature_key",
-    cookie_expiry_days=30
-)
-
-# 로그인 화면 출력
-try:
-    authenticator.login(form_name="로그인", location="main")
-except TypeError:
-    authenticator.login("main", "fields")
-
-# 세션 상태에서 안전하게 결과값 추출
-authentication_status = st.session_state.get('authentication_status', None)
-name = st.session_state.get('name', '')
-username = st.session_state.get('username', '')
-
-# [케이스 A] 로그인이 실패했을 때
-if authentication_status is False:
-    st.error("❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
-    st.stop()
-# [케이스 B] 아직 로그인을 하지 않은 기본 상태일 때
-elif authentication_status is None:
-    st.warning("🔒 승인된 계정으로 로그인 후 이용해 주세요.")
+if not st.session_state.get('authentication_status'):
+    st.error("❌ 미승인 계정") if st.session_state.get('authentication_status') is False else st.warning("🔒 로그인 필요")
     st.stop()
 
-# [케이스 C] 로그인이 성공했을 때 (이 아래로 메인 프로그램 작동)
-elif authentication_status:
+# 2. 로그인 성공 시 메인 앱 실행
+st.set_page_config(page_title="kangmini", page_icon="✨", layout="wide")
+uid, name = st.session_state.username, st.session_state.name
+idx = load_j(INDEX, {})
+if uid not in idx: idx[uid] = {}
+
+with st.sidebar:
+    st.subheader("🛠️ 설정")
+    # 관리자 기능 (계정 생성/삭제)
+    if uid == "admin":
+        tc, tm = st.tabs(["➕생성", "⚙️관리"])
+        with tc:
+            with st.form("c_f", clear_on_submit=True):
+                nid, nn, np = st.text_input("ID").strip(), st.text_input("이름").strip(), st.text_input("PW", type="password").strip()
+                if st.form_submit_button("등록") and nid and nn and np:
+                    if nid in db["usernames"]: st.error("중복 ID")
+                    else:
+                        db["usernames"][nid] = {"name": nn, "password": stauth.Hasher.hash(np)}; save_j(DB, db); st.rerun()
+        with tm:
+            for u in [k for k in db["usernames"].keys() if k != "admin"]:
+                if st.button(f"🗑️ {db['usernames'][u]['name']}({u})", key=f"d_{u}"):
+                    del db["usernames"][u]; save_j(DB, db); st.rerun()
+                    
+    # 본인 비번 직접 변경
+    with st.expander("🔒 내 비번 변경"):
+        with st.form("p_f", clear_on_submit=True):
+            cp, np, cnp = st.text_input("현재 비번", type="password"), st.text_input("새 비번", type="password"), st.text_input("새 비번 확인", type="password")
+            if st.form_submit_button("변경") and np == cnp and np:
+                if bcrypt.checkpw(cp.encode(), db["usernames"][uid]["password"].encode()):
+                    db["usernames"][uid]["password"] = stauth.Hasher.hash(np); save_j(DB, db); st.success("변경 완료!"); time.sleep(1); st.rerun()
+                else: st.error("비번 불일치")
+
+    # 멀티 대화방 목록
+    st.markdown("---"); st.header("🕒 최근 대화")
+    if st.button("➕ 새로운 채팅", use_container_width=True): st.session_state.current_room_id = None; st.rerun()
     
-    # ⚙️ 스트림릿 기본 페이지 설정
-    st.set_page_config(page_title="kangmini - AI 어시스턴트", page_icon="✨", layout="wide")
+    sorted_rooms = sorted(idx[uid].items(), key=lambda x: x[1]['timestamp'], reverse=True)
+    if "current_room_id" not in st.session_state: st.session_state.current_room_id = sorted_rooms[0][0] if sorted_rooms else None
+    
+    for rid, rinfo in sorted_rooms:
+        c1, c2 = st.columns([5, 1])
+        with c1:
+            if st.button(f"💬 {rinfo['title']}", key=f"r_{rid}", use_container_width=True, type="primary" if st.session_state.current_room_id == rid else "secondary"):
+                st.session_state.current_room_id = rid; st.rerun()
+        with c2:
+            if st.button("❌", key=f"dr_{rid}"):
+                if os.path.exists(f"h_{rid}.json"): os.remove(f"h_{rid}.json")
+                del idx[uid][rid]; save_j(INDEX, idx)
+                if st.session_state.current_room_id == rid: st.session_state.current_room_id = None
+                st.rerun()
 
-    # 4. 👑 관리자 전용 대시보드 (오직 'admin' 계정에게만 표시됨)
-    if username == "admin":
-        with st.sidebar:
-            st.subheader("👑 관리자 메뉴")
-            
-            # --- 탭을 나누어 계정 생성과 관리를 분리 ---
-            tab_create, tab_manage = st.tabs(["➕ 계정 생성", "⚙️ 계정 관리"])
-            
-            # [탭 1: 계정 생성]
-            with tab_create:
-                with st.form("new_user_form", clear_on_submit=True):
-                    new_id = st.text_input("새 사용자 ID (영문/숫자)").strip()
-                    new_name = st.text_input("새 사용자 이름(닉네임)").strip()
-                    new_pw = st.text_input("새 사용자 비밀번호", type="password").strip()
-                    submit_btn = st.form_submit_button("🚀 신규 계정 승인 및 저장")
-                    
-                    if submit_btn:
-                        if not new_id or not new_name or not new_pw:
-                            st.error("모든 칸을 입력해 주세요.")
-                        elif new_id in credentials["usernames"]:
-                            st.error("이미 존재하는 아이디입니다.")
-                        else:
-                            credentials["usernames"][new_id] = {
-                                "name": new_name,
-                                "password": stauth.Hasher.hash(new_pw)
-                            }
-                            save_users(credentials)
-                            st.success(f"🎉 '{new_name}'님의 계정이 승인되었습니다!")
-                            st.rerun()
+# 3. 대화창 본문 구성
+rid = st.session_state.current_room_id or f"r_{uid}_{int(time.time())}"
+HF = f"h_{rid}.json"
+msgs = load_j(HF, [])
 
-            # [탭 2: 계정 관리 - 삭제 기능]
-            with tab_manage:
-                st.markdown("**현재 등록된 사용자 목록**")
-                
-                user_list = [uid for uid in credentials["usernames"].keys() if uid != "admin"]
-                
-                if not user_list:
-                    st.caption("등록된 일반 사용자가 없습니다.")
-                else:
-                    for uid in user_list:
-                        u_name = credentials["usernames"][uid]["name"]
-                        
-                        # 가로 레이아웃 비율 고정 및 명시 (4대 1 비율)
-                        col_u, col_b = st.columns([4, 1])
-                        with col_u:
-                            st.markdown(f"👤 **{u_name}** (`{uid}`)")
-                        with col_b:
-                            if st.button("🗑️", key=f"del_{uid}", use_container_width=True):
-                                del credentials["usernames"][uid]
-                                save_users(credentials)
-                                
-                                target_history = f"chat_history_{uid}.json"
-                                if os.path.exists(target_history):
-                                    os.remove(target_history)
-                                    
-                                st.success(f"❌ {u_name} 계정이 삭제되었습니다.")
-                                st.rerun()
+c_t, c_l = st.columns([5, 1])
+c_t.title("✨ 안녕, 나는 강미나이야 (kangmini)")
+c_t.caption(f"👋 반갑습니다 {name}님!")
+with c_l: st.write(""); auth.logout("로그아웃", "main")
 
-    # --- 메인 AI 대화 공간 ---
-    HISTORY_FILE = f"chat_history_{username}.json"
+for m in msgs:
+    with st.chat_message("kangmini" if m["role"] == "assistant" else "user", avatar="✨" if m["role"] == "assistant" else None): st.write(m["content"])
 
-    # 🛠️ [핵심 수정]: 화면을 2칸으로 분할하도록 컬럼의 개수를 숫자 '2'로 확실하게 지정
-    col1, col2 = st.columns([5, 1]) # 타이틀을 더 넓게(5), 로그아웃을 좁게(1) 배치
-    with col1:
-        st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
-        st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
-    with col2:
-        st.write("") 
-        authenticator.logout(button_name="로그아웃", location="main")
+if inp := st.chat_input("강미나이에게 물어보세요..."):
+    st.chat_message("user").write(inp); msgs.append({"role": "user", "content": inp})
+    if st.session_state.current_room_id is None:
+        st.session_state.current_room_id = rid
+        idx[uid][rid] = {"title": inp[:12] + "..." if len(inp) > 12 else inp, "timestamp": time.time()}; save_j(INDEX, idx)
+    save_j(HF, msgs)
 
-    def load_history():
-        if os.path.exists(HISTORY_FILE):
-            try:
-                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return []
-        return []
-
-    def save_history(messages):
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(messages, f, ensure_ascii=False, indent=4)
-
-    if "GEMINI_API_KEY" in st.secrets:
-        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
-    else:
-        st.error("🔑 API 키가 설정되지 않았습니다. Streamlit Secrets를 확인해주세요.")
-        st.stop()
-
-    client = genai.Client()
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = load_history()
-
-    # 사이드바 공통 메뉴
-    with st.sidebar:
-        st.header("✨ AI 프로필")
-        st.markdown(f"**현재 유저:** {name}님")
-        st.markdown("**기반 기술:** Gemini 3.5 Flash")
-        st.markdown("---")
-        
-        if st.button("🗑️ 내 대화 내역만 삭제", key="clear_my_chat"):
-            st.session_state.messages = []
-            if os.path.exists(HISTORY_FILE):
-                os.remove(HISTORY_FILE)
-            st.rerun()
-
-    # 이전 기록 출력
-    for message in st.session_state.messages:
-        if isinstance(message, dict) and "role" in message and "content" in message:
-            display_role = "kangmini" if message["role"] == "assistant" else "user"
-            avatar = "✨" if message["role"] == "assistant" else None
-            with st.chat_message(display_role, avatar=avatar):
-                st.write(message["content"])
-
-    # 채팅 입력 및 답변 처리
-    if user_input := st.chat_input("강미나이에게 무엇이든 물어보세요..."):
-        st.chat_message("user").write(user_input)
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        save_history(st.session_state.messages)
-
-        with st.chat_message("kangmini", avatar="✨"):
-            with st.spinner("생각 중..."):
-                try:
-                    formatted_contents = []
-                    for msg in st.session_state.messages:
-                        role = "model" if msg["role"] == "assistant" else "user"
-                        formatted_contents.append({
-                            "role": role,
-                            "parts": [{"text": msg["content"]}]
-                        })
-
-                    system_prompt = (
-                        "당신의 이름은 한글로 '강미나이', 영문으로는 'kangmini'입니다. 구글의 제미나이(Gemini) 모델을 기반으로 만들어진 "
-                        "매우 똑똑하고 친절한 AI 어시스턴트입니다. 사용자가 이름을 물어보면 반드시 '강미나이(kangmini)'라고 답해야 합니다. "
-                        "답변 스타일은 구글 제미나이 공식 서비스처럼 정중하고, 가독성이 높으며(마크다운, 글머리 기호 적극 사용), "
-                        "유용하고 유익한 정보를 명확하게 제공해야 합니다. 무례하거나 부적절한 질문에는 침착하고 객관적으로 거절하세요."
-                    )
-
-                    response = client.models.generate_content(
-                        model='gemini-3.5-flash',
-                        contents=formatted_contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt
-                        )
-                    )
-                    ai_response = response.text
-                    
-                    st.write(ai_response)
-                    st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                    save_history(st.session_state.messages)
-                    
-                except Exception as e:
-                    st.error(f"통신 중 오류가 발생했습니다: {e}")
+    with st.chat_message("kangmini", avatar="✨"), st.spinner("생각 중..."):
+        try:
+            os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+            fmt = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in msgs]
+            sys = "당신의 이름은 '강미나이(kangmini)'입니다. 구글 제미나이 기반 친절하고 똑똑한 AI입니다. 가독성 좋게 답하세요."
+            ans = genai.Client().models.generate_content(model='gemini-3.5-flash', contents=fmt, config=types.GenerateContentConfig(system_instruction=sys)).text
+            st.write(ans); msgs.append({"role": "assistant", "content": ans}); save_j(HF, msgs); st.rerun()
+        except Exception as e: st.error(f"오류: {e}")
