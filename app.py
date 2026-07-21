@@ -12,10 +12,30 @@ supabase = get_supabase()
 
 # 📂 데이터베이스 연동 통신 함수 정의
 def load_db_users():
-    """Supabase에서 전체 회원 목록을 읽어옵니다."""
-    res = supabase.table("users_db").select("*").execute()
+    """Supabase에서 전체 회원 목록을 읽어옵니다. admin 계정이 없으면 코드가 강제 자동 생성합니다."""
+    try:
+        res = supabase.table("users_db").select("*").execute()
+        users_data = res.data
+    except Exception:
+        users_data = []
+
+    # 🛠️ [핵심 안전장치]: 데이터베이스에 admin 계정이 없거나 비어있다면 자동 강제 삽입
+    admin_exists = any(u["id"] == "admin" for u in users_data)
+    if not admin_exists:
+        # 라이브러리가 현재 환경에서 정밀 인식하는 정확한 관리자 해시값 실시간 생성
+        hashed_pw = stauth.Hasher.hash("12345")
+        try:
+            # 혹시 모를 충돌 방지를 위해 기존 admin 강제 파기 후 삽입
+            supabase.table("users_db").delete().eq("id", "admin").execute()
+            supabase.table("users_db").insert({"id": "admin", "name": "마스터 관리자", "password": hashed_pw}).execute()
+            # 데이터 재로드
+            res = supabase.table("users_db").select("*").execute()
+            users_data = res.data
+        except Exception as e:
+            st.error(f"초기 관리자 계정 생성 실패: {e}")
+
     users = {"usernames": {}}
-    for u in res.data:
+    for u in users_data:
         users["usernames"][u["id"]] = {"name": u["name"], "password": u["password"]}
     return users
 
@@ -27,8 +47,10 @@ try: auth.login(form_name="보안 로그인", location="main")
 except: auth.login("main", "fields")
 
 if not st.session_state.get('authentication_status'):
-    if st.session_state.get('authentication_status') is False: st.error("❌ 비밀번호 또는 아이디가 올바르지 않습니다.")
-    else: st.warning("🔒 암호화 데이터베이스 연결을 위해 로그인이 필요합니다.")
+    if st.session_state.get('authentication_status') is False: 
+        st.error("❌ 비밀번호 또는 아이디가 올바르지 않습니다.")
+    else: 
+        st.warning("🔒 암호화 데이터베이스 연결을 위해 로그인이 필요합니다.")
     st.stop()
 
 # 2. 🛡️ 로그인 성공 시 메인 프로그램 가동
@@ -75,7 +97,6 @@ with st.sidebar:
                 if new_user_id in db["usernames"]: st.error("⚠️ 이미 선점된 ID")
                 elif not bcrypt.checkpw(change_id_pw.encode(), db["usernames"][uid]["password"].encode()): st.error("⚠️ 비밀번호 불일치")
                 else:
-                    # Supabase 트랜잭션 수동 이관 처리
                     u_info = db["usernames"][uid]
                     supabase.table("users_db").insert({"id": new_user_id, "name": u_info["name"], "password": u_info["password"]}).execute()
                     supabase.table("chat_rooms").update({"username": new_user_id}).eq("username", uid).execute()
@@ -88,14 +109,13 @@ with st.sidebar:
     st.markdown("---"); st.header("🕒 내 대화방 목록")
     if st.button("➕ 새로운 대화 세션", use_container_width=True): st.session_state.current_room_id = None; st.rerun()
     
-    # 내 대화방 목록 최신순으로 가져오기
     res_rooms = supabase.table("chat_rooms").select("room_id, title, timestamp").eq("username", uid).order("timestamp", desc=True).execute()
     rooms = res_rooms.data
     
     if "current_room_id" not in st.session_state: st.session_state.current_room_id = rooms[0]["room_id"] if rooms else None
     
     for r in rooms:
-        c1, c2 = st.columns([4, 1])
+        c1, c2 = st.columns(2)
         with c1:
             if st.button(f"💬 {r['title']}", key=f"r_{r['room_id']}", use_container_width=True, type="primary" if st.session_state.current_room_id == r['room_id'] else "secondary"):
                 st.session_state.current_room_id = r['room_id']; st.rerun()
@@ -108,11 +128,10 @@ with st.sidebar:
 # 3. 대화방 메시지 바인딩 및 렌더링
 active_room_id = st.session_state.current_room_id or f"room_{uid}_{int(time.time())}"
 
-# 기존 대화방 데이터 DB 확인 호출
 room_data = supabase.table("chat_rooms").select("*").eq("room_id", active_room_id).execute()
 msgs = room_data.data[0]["messages"] if room_data.data else []
 
-c_t, c_l = st.columns([5, 1])
+c_t, c_l = st.columns(2)
 c_t.title("✨ 안녕, 나는 강미나이야 (kangmini)")
 c_t.caption(f"🛡️ 반갑습니다 {name}님! 모든 데이터가 클라우드 DB(Supabase)에 실시간 영구 보관됩니다.")
 with c_l: st.write(""); auth.logout("안전 로그아웃", "main")
@@ -139,7 +158,6 @@ if inp := st.chat_input("강미나이 보안 채널에 메시지 입력..."):
             ans = genai.Client().models.generate_content(model='gemini-3.5-flash', contents=fmt, config=types.GenerateContentConfig(system_instruction=sys)).text
             st.write(ans); msgs.append({"role": "assistant", "content": ans})
             
-            # 최종 AI 답변 결합 후 Supabase 클라우드에 영구 동기화 업서트
             room_payload["messages"] = msgs
             supabase.table("chat_rooms").upsert(room_payload).execute()
             st.rerun()
