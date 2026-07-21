@@ -13,7 +13,6 @@ supabase = get_supabase()
 # 📂 데이터베이스 강제 무결성 보장 함수
 def init_secure_db():
     try:
-        # 데이터베이스 서버 연결 및 기존 계정 검색
         res = supabase.table("users_db").select("*").execute()
         users_data = res.data
     except Exception:
@@ -22,6 +21,7 @@ def init_secure_db():
     # 데이터베이스에 admin 계정이 없으면 암호화하여 강제 재생성
     admin_exists = any(u["id"] == "admin" for u in users_data)
     if not admin_exists:
+        # 안전한 Bcrypt 방식으로 암호화하여 데이터 삽입
         hashed_pw = bcrypt.hashpw("12345".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         try:
             supabase.table("users_db").delete().eq("id", "admin").execute()
@@ -49,8 +49,11 @@ if not st.session_state.auth_status:
             try:
                 # 데이터베이스에서 입력한 ID 유저 검색
                 res = supabase.table("users_db").select("*").eq("id", input_id).execute()
-                if res.data:
-                    user_info = res.data[0]
+                
+                # 🛠️ [버그 해결 핵심]: 리스트 결과가 비어있지 않은지 검증 후 [0]번째 객체를 명시적으로 타겟팅합니다.
+                if res.data and len(res.data) > 0:
+                    user_info = res.data[0] # 리스트 내부의 첫 번째 유저 딕셔너리 추출
+                    
                     # 암호화된 Bcrypt 비밀번호 일치 검증
                     if bcrypt.checkpw(input_pw.encode('utf-8'), user_info["password"].encode('utf-8')):
                         st.session_state.auth_status = True
@@ -135,10 +138,10 @@ with st.sidebar:
     res_rooms = supabase.table("chat_rooms").select("room_id, title, timestamp").eq("username", uid).order("timestamp", desc=True).execute()
     rooms = res_rooms.data
     
-    if "current_room_id" not in st.session_state: st.session_state.current_room_id = rooms[0]["room_id"] if rooms else None
+    if "current_room_id" not in st.session_state: st.session_state.current_room_id = rooms["room_id"] if rooms else None
     
     for r in rooms:
-        c1, c2 = st.columns([4, 1])
+        c1, c2 = st.columns()
         with c1:
             if st.button(f"💬 {r['title']}", key=f"r_{r['room_id']}", use_container_width=True, type="primary" if st.session_state.current_room_id == r['room_id'] else "secondary"):
                 st.session_state.current_room_id = r['room_id']; st.rerun()
@@ -154,7 +157,7 @@ active_room_id = st.session_state.current_room_id or f"room_{uid}_{int(time.time
 room_data = supabase.table("chat_rooms").select("*").eq("room_id", active_room_id).execute()
 msgs = room_data.data[0]["messages"] if room_data.data else []
 
-c_t, c_l = st.columns([5, 1])
+c_t, c_l = st.columns()
 c_t.title("✨ 안녕, 나는 강미나이야 (kangmini)")
 c_t.caption(f"🛡️ 반갑습니다 {name}님! 모든 데이터가 클라우드 DB(Supabase)에 실시간 영구 보관됩니다.")
 with c_l:
