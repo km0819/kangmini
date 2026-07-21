@@ -17,12 +17,9 @@ auth = stauth.Authenticate(db, "k_cookie", "k_key", 30)
 try: auth.login(form_name="로그인", location="main")
 except: auth.login("main", "fields")
 
-# 🔒 [문제 해결]: 한 줄 코딩을 정석 구조로 풀어내어 시스템 문구 노출을 완벽 차단했습니다.
 if not st.session_state.get('authentication_status'):
-    if st.session_state.get('authentication_status') is False:
-        st.error("❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
-    else:
-        st.warning("🔒 승인된 계정으로 로그인 후 이용해 주세요.")
+    if st.session_state.get('authentication_status') is False: st.error("❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
+    else: st.warning("🔒 승인된 계정으로 로그인 후 이용해 주세요.")
     st.stop()
 
 # 2. 로그인 성공 시 메인 앱 실행
@@ -41,21 +38,48 @@ with st.sidebar:
                 nid, nn, np = st.text_input("ID").strip(), st.text_input("이름").strip(), st.text_input("PW", type="password").strip()
                 if st.form_submit_button("등록") and nid and nn and np:
                     if nid in db["usernames"]: st.error("중복 ID")
-                    else:
-                        db["usernames"][nid] = {"name": nn, "password": stauth.Hasher.hash(np)}; save_j(DB, db); st.rerun()
+                    else: db["usernames"][nid] = {"name": nn, "password": stauth.Hasher.hash(np)}; save_j(DB, db); st.rerun()
         with tm:
             for u in [k for k in db["usernames"].keys() if k != "admin"]:
                 if st.button(f"🗑️ {db['usernames'][u]['name']}({u})", key=f"d_{u}"):
                     del db["usernames"][u]; save_j(DB, db); st.rerun()
                     
-    # 본인 비번 직접 변경
-    with st.expander("🔒 내 비번 변경"):
+    # 🛠️ [핵심 추가]: 내 정보 변경 (비번 및 아이디 변경 기능)
+    with st.expander("👤 내 정보 변경하기"):
+        # 비밀번호 변경 폼
         with st.form("p_f", clear_on_submit=True):
+            st.markdown("**비밀번호 변경**")
             cp, np, cnp = st.text_input("현재 비번", type="password"), st.text_input("새 비번", type="password"), st.text_input("새 비번 확인", type="password")
-            if st.form_submit_button("변경") and np == cnp and np:
+            if st.form_submit_button("비밀번호 변경") and np == cnp and np:
                 if bcrypt.checkpw(cp.encode(), db["usernames"][uid]["password"].encode()):
                     db["usernames"][uid]["password"] = stauth.Hasher.hash(np); save_j(DB, db); st.success("변경 완료!"); time.sleep(1); st.rerun()
                 else: st.error("비번 불일치")
+        
+        # 아이디 변경 폼 (과거 대화방 데이터 완전 승계 이관 시스템 탑재)
+        with st.form("id_f", clear_on_submit=True):
+            st.markdown("**아이디(ID) 변경**")
+            change_id_pw = st.text_input("본인 확인용 비밀번호", type="password")
+            new_user_id = st.text_input("새로운 아이디 (영문/숫자)").strip()
+            if st.form_submit_button("아이디 변경 적용") and new_user_id:
+                if new_user_id in db["usernames"]: st.error("이미 사용 중인 아이디")
+                elif not bcrypt.checkpw(change_id_pw.encode(), db["usernames"][uid]["password"].encode()): st.error("비밀번호 불일치")
+                else:
+                    # 1) 유저 데이터베이스 키 이관
+                    db["usernames"][new_user_id] = db["usernames"].pop(uid)
+                    save_j(DB, db)
+                    # 2) 대화방 인덱스 정보 이관
+                    if uid in idx:
+                        idx[new_user_id] = idx.pop(uid)
+                        # 3) 실제 저장된 개별 대화 내역 JSON 파일명 일괄 변경
+                        for old_rid in list(idx[new_user_id].keys()):
+                            new_rid = old_rid.replace(f"r_{uid}_", f"r_{new_user_id}_")
+                            if os.path.exists(f"h_{old_rid}.json"): os.rename(f"h_{old_rid}.json", f"h_{new_rid}.json")
+                            idx[new_user_id][new_rid] = idx[new_user_id].pop(old_rid)
+                        save_j(INDEX, idx)
+                    st.success("ID 변경 완료! 다시 로그인해 주세요.")
+                    # 세션 강제 만료 및 쿠키 무효화 처리 후 로그인 창으로 리다이렉트
+                    st.session_state['authentication_status'] = None
+                    time.sleep(1.5); st.rerun()
 
     # 멀티 대화방 목록
     st.markdown("---"); st.header("🕒 최근 대화")
