@@ -14,11 +14,15 @@ db = load_j(DB, {"usernames": {"admin": {"name": "관리자", "password": stauth
 save_j(DB, db)
 auth = stauth.Authenticate(db, "k_cookie", "k_key", 30)
 
-try: auth.login("로그인", "main")
+try: auth.login(form_name="로그인", location="main")
 except: auth.login("main", "fields")
 
+# 🔒 [문제 해결]: 한 줄 코딩을 정석 구조로 풀어내어 시스템 문구 노출을 완벽 차단했습니다.
 if not st.session_state.get('authentication_status'):
-    st.error("❌ 미승인 계정") if st.session_state.get('authentication_status') is False else st.warning("🔒 로그인 필요")
+    if st.session_state.get('authentication_status') is False:
+        st.error("❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
+    else:
+        st.warning("🔒 승인된 계정으로 로그인 후 이용해 주세요.")
     st.stop()
 
 # 2. 로그인 성공 시 메인 앱 실행
@@ -57,8 +61,8 @@ with st.sidebar:
     st.markdown("---"); st.header("🕒 최근 대화")
     if st.button("➕ 새로운 채팅", use_container_width=True): st.session_state.current_room_id = None; st.rerun()
     
-    sorted_rooms = sorted(idx[uid].items(), key=lambda x: x[1]['timestamp'], reverse=True)
-    if "current_room_id" not in st.session_state: st.session_state.current_room_id = sorted_rooms[0][0] if sorted_rooms else None
+    sorted_rooms = sorted(idx[uid].items(), key=lambda x: x['timestamp'], reverse=True)
+    if "current_room_id" not in st.session_state: st.session_state.current_room_id = sorted_rooms if sorted_rooms else None
     
     for rid, rinfo in sorted_rooms:
         c1, c2 = st.columns([5, 1])
@@ -66,7 +70,7 @@ with st.sidebar:
             if st.button(f"💬 {rinfo['title']}", key=f"r_{rid}", use_container_width=True, type="primary" if st.session_state.current_room_id == rid else "secondary"):
                 st.session_state.current_room_id = rid; st.rerun()
         with c2:
-            if st.button("❌", key=f"dr_{rid}"):
+            if st.button("❌", key=f"dr_{rid}", use_container_width=True):
                 if os.path.exists(f"h_{rid}.json"): os.remove(f"h_{rid}.json")
                 del idx[uid][rid]; save_j(INDEX, idx)
                 if st.session_state.current_room_id == rid: st.session_state.current_room_id = None
