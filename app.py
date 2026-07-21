@@ -102,11 +102,10 @@ elif authentication_status:
                             st.success(f"🎉 '{new_name}'님의 계정이 승인되었습니다!")
                             st.rerun()
 
-            # 🛠️ [탭 2: 계정 관리 - 삭제 기능 핵심 추가]
+            # [탭 2: 계정 관리 - 삭제 기능]
             with tab_manage:
                 st.markdown("**현재 등록된 사용자 목록**")
                 
-                # 마스터 관리자(admin)를 제외한 일반 사용자들만 필터링
                 user_list = [uid for uid in credentials["usernames"].keys() if uid != "admin"]
                 
                 if not user_list:
@@ -115,18 +114,15 @@ elif authentication_status:
                     for uid in user_list:
                         u_name = credentials["usernames"][uid]["name"]
                         
-                        # 가로 레이아웃으로 이름 표시와 삭제 버튼 배치
-                        col_u, col_b = st.columns([3, 2])
+                        # 가로 레이아웃 비율 고정 및 명시 (4대 1 비율)
+                        col_u, col_b = st.columns([4, 1])
                         with col_u:
                             st.markdown(f"👤 **{u_name}** (`{uid}`)")
                         with col_b:
-                            # 각 유저마다 고유한 고유 키를 지정하여 버튼 생성
-                            if st.button("🗑️ 삭제", key=f"del_{uid}", use_container_width=True):
-                                # 데이터베이스에서 유저 삭제
+                            if st.button("🗑️", key=f"del_{uid}", use_container_width=True):
                                 del credentials["usernames"][uid]
                                 save_users(credentials)
                                 
-                                # 해당 유저의 과거 대화 내역 파일도 함께 깔끔하게 삭제 (선택 사항)
                                 target_history = f"chat_history_{uid}.json"
                                 if os.path.exists(target_history):
                                     os.remove(target_history)
@@ -137,7 +133,8 @@ elif authentication_status:
     # --- 메인 AI 대화 공간 ---
     HISTORY_FILE = f"chat_history_{username}.json"
 
-    col1, col2 = st.columns()
+    # 🛠️ [핵심 수정]: 화면을 2칸으로 분할하도록 컬럼의 개수를 숫자 '2'로 확실하게 지정
+    col1, col2 = st.columns([5, 1]) # 타이틀을 더 넓게(5), 로그아웃을 좁게(1) 배치
     with col1:
         st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
         st.caption(f"👋 반갑습니다 {name}(@{username})님! 당신만의 안전한 전용 대화방입니다.")
