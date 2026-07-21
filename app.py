@@ -18,7 +18,6 @@ def init_secure_db():
     except Exception:
         users_data = []
 
-    # 데이터베이스에 admin 계정이 없으면 암호화하여 강제 재생성
     admin_exists = any(isinstance(u, dict) and u.get("id") == "admin" for u in users_data)
     if not admin_exists:
         hashed_pw = bcrypt.hashpw("12345".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -45,10 +44,8 @@ if not st.session_state.auth_status:
                 res = supabase.table("users_db").select("*").eq("id", input_id).execute()
                 res_data = res.data if hasattr(res, "data") else res
                 
-                # 🛠️ [정밀 수정]: 리스트의 첫 번째 원소 데이터 구조를 안전하게 추출합니다.
                 if res_data and len(res_data) > 0:
-                    user_info = res_data[0] # 첫 번째 회원 데이터를 정상 매핑
-                    
+                    user_info = res_data[0]
                     if bcrypt.checkpw(input_pw.encode('utf-8'), user_info["password"].encode('utf-8')):
                         st.session_state.auth_status = True
                         st.session_state.username = user_info["id"]
@@ -56,12 +53,9 @@ if not st.session_state.auth_status:
                         st.success("🔒 암호화 보안 세션 연결 성공!")
                         time.sleep(0.5)
                         st.rerun()
-                    else:
-                        st.error("❌ 비밀번호가 올바르지 않습니다.")
-                else:
-                    st.error("❌ 존재하지 않는 아이디입니다.")
-            except Exception as e:
-                st.error(f"데이터베이스 연결 오류: {e}")
+                    else: st.error("❌ 비밀번호가 올바르지 않습니다.")
+                else: st.error("❌ 존재하지 않는 아이디입니다.")
+            except Exception as e: st.error(f"데이터베이스 연결 오류: {e}")
     st.stop()
 
 # 3. 🛡️ [로그인 완료 상태] 메인 프로그램 작동
@@ -142,21 +136,18 @@ with st.sidebar:
                 st.rerun()
 
 # 4. 대화방 메시지 바인딩 및 렌더링
-active_room_id = st.session_state.current_room_id or f"room_{uid}_{int(time.time())}"
+active_room_id = st.session_state.current_room_id or f"r_{uid}_{int(time.time())}"
 
 room_data = supabase.table("chat_rooms").select("*").eq("room_id", active_room_id).execute()
 room_res = room_data.data if hasattr(room_data, "data") else room_data
 msgs = room_res[0]["messages"] if room_res else []
 
-c_t, c_l = st.columns(2)
-c_t.title("✨ 안녕, 나는 강미나이야 (kangmini)")
-c_t.caption(f"🛡️ 반갑습니다 {name}님! 모든 데이터가 클라우드 DB(Supabase)에 실시간 영구 보관됩니다.")
-with c_l:
-    st.write("")
-    if st.button("안전 로그아웃", use_container_width=True):
-        st.session_state.auth_status = False
-        st.session_state.username = None
-        st.rerun()
+st.title("✨ 안녕, 나는 강미나이야 (kangmini)")
+st.caption(f"🛡️ 반갑습니다 {name}님! 모든 데이터가 클라우드 DB(Supabase)에 실시간 영구 보관됩니다.")
+if st.button("안전 로그아웃"):
+    st.session_state.auth_status = False
+    st.session_state.username = None
+    st.rerun()
 
 for m in msgs:
     with st.chat_message("kangmini" if m["role"] == "assistant" else "user", avatar="✨" if m["role"] == "assistant" else None): st.write(m["content"])
@@ -174,10 +165,20 @@ if inp := st.chat_input("강미나이 보안 채널에 메시지 입력..."):
 
     with st.chat_message("kangmini", avatar="✨"), st.spinner("보안 통신망 해석 중..."):
         try:
+            # 🛠️ [핵심 수정]: 'Client has been closed' 에러 원천 차단!
+            # 클라이언트 초기화 함수를 괄호 밖(상단 전역)이 아닌, API 통신 직전에 배치하여 커넥션을 실시간 활성화합니다.
             os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+            client = genai.Client() # 질문할 때마다 싱싱한 클라이언트를 동적으로 생성
+            
             fmt = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in msgs]
             sys = "당신의 이름은 '강미나이(kangmini)'입니다. 구글 제미나이 기반 친절하고 똑똑한 AI입니다."
-            ans = genai.Client().models.generate_content(model='gemini-3.5-flash', contents=fmt, config=types.GenerateContentConfig(system_instruction=sys)).text
+            
+            ans = client.models.generate_content(
+                model='gemini-3.5-flash', 
+                contents=fmt, 
+                config=types.GenerateContentConfig(system_instruction=sys)
+            ).text
+            
             st.write(ans); msgs.append({"role": "assistant", "content": ans})
             
             room_payload["messages"] = msgs
