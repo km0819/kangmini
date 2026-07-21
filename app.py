@@ -14,12 +14,12 @@ supabase = get_supabase()
 def init_secure_db():
     try:
         res = supabase.table("users_db").select("*").execute()
-        users_data = res.data
+        users_data = res.data if hasattr(res, "data") else res
     except Exception:
         users_data = []
 
     # 데이터베이스에 admin 계정이 없으면 암호화하여 강제 재생성
-    admin_exists = any(u["id"] == "admin" for u in users_data)
+    admin_exists = any(isinstance(u, dict) and u.get("id") == "admin" for u in users_data)
     if not admin_exists:
         hashed_pw = bcrypt.hashpw("12345".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         try:
@@ -31,14 +31,10 @@ def init_secure_db():
 init_secure_db()
 
 # 2. 🔒 로그인 인증 시스템 가동
-if "auth_status" not in st.session_state:
-    st.session_state.auth_status = False
-if "username" not in st.session_state:
-    st.session_state.username = None
-if "name" not in st.session_state:
-    st.session_state.name = None
+if "auth_status" not in st.session_state: st.session_state.auth_status = False
+if "username" not in st.session_state: st.session_state.username = None
+if "name" not in st.session_state: st.session_state.name = None
 
-# 로그인 성공 여부에 따른 화면 분기
 if not st.session_state.auth_status:
     st.title("🔒 강미나이 보안 로그인 시스템")
     with st.form("direct_login_form"):
@@ -46,14 +42,13 @@ if not st.session_state.auth_status:
         input_pw = st.text_input("비밀번호(PW)", type="password").strip()
         if st.form_submit_button("로그인 인증 요청"):
             try:
-                # 데이터베이스에서 입력한 ID 유저 검색
                 res = supabase.table("users_db").select("*").eq("id", input_id).execute()
+                res_data = res.data if hasattr(res, "data") else res
                 
-                # 🛠️ [버그 해결 핵심]: 리스트 내부의 '첫 번째 원소([0])'인 딕셔너리를 정확하게 추출합니다.
-                if res.data and len(res.data) > 0:
-                    user_info = res.data[0]  # 👈 이 부분이 빠져서 그동안 데이터 매핑이 깨졌던 것입니다!
+                # 🛠️ [정밀 수정]: 리스트의 첫 번째 원소 데이터 구조를 안전하게 추출합니다.
+                if res_data and len(res_data) > 0:
+                    user_info = res_data[0] # 첫 번째 회원 데이터를 정상 매핑
                     
-                    # 암호화된 Bcrypt 비밀번호 일치 검증
                     if bcrypt.checkpw(input_pw.encode('utf-8'), user_info["password"].encode('utf-8')):
                         st.session_state.auth_status = True
                         st.session_state.username = user_info["id"]
@@ -73,17 +68,15 @@ if not st.session_state.auth_status:
 st.set_page_config(page_title="kangmini - Database", page_icon="🛡️", layout="wide")
 uid, name = st.session_state.username, st.session_state.name
 
-# 유저 목록 가상 동기화를 위한 최신 디비 로드 함수
 def get_current_users():
     res = supabase.table("users_db").select("id, name, password").execute()
-    return {u["id"]: u for u in res.data}
+    res_data = res.data if hasattr(res, "data") else res
+    return {u["id"]: u for u in res_data if isinstance(u, dict) and "id" in u}
 
 db_users = get_current_users()
 
 with st.sidebar:
     st.markdown("### 🛡️ 데이터베이스 제어 센터")
-    
-    # 👑 마스터 관리자 유저 추가/삭제 통제
     if uid == "admin":
         tc, tm = st.tabs(["➕ 유저 승인", "⚙️ 유저 파기"])
         with tc:
@@ -102,7 +95,6 @@ with st.sidebar:
                     supabase.table("chat_rooms").delete().eq("username", u).execute()
                     st.success("데이터 영구 파기 완료!"); time.sleep(0.5); st.rerun()
                     
-    # 🔐 내 개인 정보 업데이트 (비번 및 아이디 변경 기능)
     with st.expander("👤 비밀 정보 업데이트"):
         with st.form("p_f", clear_on_submit=True):
             st.markdown("**🔐 비밀번호 변경 (Bcrypt)**")
@@ -130,14 +122,13 @@ with st.sidebar:
                     st.session_state.auth_status = False
                     time.sleep(1.5); st.rerun()
 
-    # 🕒 DB 저장 기반 제미나이 멀티 대화방 리스트 출력
     st.markdown("---"); st.header("🕒 내 대화방 목록")
     if st.button("➕ 새로운 대화 세션", use_container_width=True): st.session_state.current_room_id = None; st.rerun()
     
     res_rooms = supabase.table("chat_rooms").select("room_id, title, timestamp").eq("username", uid).order("timestamp", desc=True).execute()
-    rooms = res_rooms.data
+    rooms = res_rooms.data if hasattr(res_rooms, "data") else res_rooms
     
-    if "current_room_id" not in st.session_state: st.session_state.current_room_id = rooms["room_id"] if rooms else None
+    if "current_room_id" not in st.session_state: st.session_state.current_room_id = rooms[0]["room_id"] if rooms else None
     
     for r in rooms:
         c1, c2 = st.columns(2)
@@ -154,7 +145,8 @@ with st.sidebar:
 active_room_id = st.session_state.current_room_id or f"room_{uid}_{int(time.time())}"
 
 room_data = supabase.table("chat_rooms").select("*").eq("room_id", active_room_id).execute()
-msgs = room_data.data[0]["messages"] if room_data.data else [] # 🛠️ 여기도 리스트 첫 번째 원소 인덱싱 반영
+room_res = room_data.data if hasattr(room_data, "data") else room_data
+msgs = room_res[0]["messages"] if room_res else []
 
 c_t, c_l = st.columns(2)
 c_t.title("✨ 안녕, 나는 강미나이야 (kangmini)")
